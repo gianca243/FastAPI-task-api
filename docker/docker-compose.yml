@@ -1,0 +1,10 @@
+version: '3.9'
+services:
+  postgres_test_server:
+    image: postgres
+    ports:
+      - 8081:5432
+    environment:
+      - POSTGRES_PASSWORD=omgomgomg1
+    volumes:
+      - ./database:/var/lib/postgresql/data

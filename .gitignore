@@ -1,0 +1,4 @@
+.venv
+docker/database
+*.pyc
+.env

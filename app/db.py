@@ -5,8 +5,8 @@ from sqlmodel import create_engine, SQLModel, Session
 PASSWORD = os.environ["POSTGRES_PASSWORD"]
 postgesql_url = f"postgresql://postgres:{PASSWORD}@localhost:8081/postgres"
 
-connect_args = {"check_same_thread": False}
-engine = create_engine(postgesql_url, connect_args=connect_args)
+
+engine = create_engine(postgesql_url)
 
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)

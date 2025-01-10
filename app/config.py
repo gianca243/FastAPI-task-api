@@ -11,5 +11,8 @@ class Settings(BaseSettings):
 
 def define_env_variables():
     settings = Settings()
-    print("omg")
+    os.environ["POSTGRES_PASSWORD"] = settings.POSTGRES_PASSWORD
+    print("omg env variables are configured")
+
+define_env_variables()
 

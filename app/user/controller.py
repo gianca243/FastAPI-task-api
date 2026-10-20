@@ -9,11 +9,13 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlmodel import Session, select
 from app.db import get_session
 from app.user.model import User
+from app.config import get_settings
 
 from pydantic import BaseModel, Field
 
-ACCESS_TOKEN_EXPIRE_MINUTES = os.environ["ACCESS_TOKEN_EXPIRE_MINUTES"]
-SECRET = os.environ["SECRET"]
+settings = get_settings()
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
+SECRET = settings.secret
 ALGORITHM = "HS256"
 
 class UserModel(BaseModel):
@@ -65,7 +67,7 @@ async def check_jwt(credentials: HTTPAuthorizationCredentials = Security(securit
             detail="No valid token",
         ) from exc
 
-@router.post("/singin", tags=["users"])
+@router.post("/signup", tags=["users"])
 async def register(user: Annotated[UserModel, Body()], session: SessionDep):
     db_user = User(
         password=pwd_context.hash(user.password),
@@ -79,8 +81,8 @@ async def register(user: Annotated[UserModel, Body()], session: SessionDep):
         "name": db_user.name
     }
 
-@router.get("/login", tags=["users"])
-async def login(user: Annotated[UserModel, Query()], session: SessionDep):
+@router.post("/login", tags=["users"])
+async def login(user: Annotated[UserModel, Body()], session: SessionDep):
     db_user = await check_user_password(user, session)
     if not db_user:
         raise HTTPException(

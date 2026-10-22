@@ -1,6 +1,5 @@
 from contextlib import asynccontextmanager
 
-import app.config
 # import uvicorn
 from fastapi import FastAPI
 from app.user import controller as user_controller

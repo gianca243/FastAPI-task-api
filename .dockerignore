@@ -1,0 +1,7 @@
+.venv
+.git
+.env
+docker/database
+local_run
+**/__pycache__
+**/*.pyc

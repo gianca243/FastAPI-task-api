@@ -1,10 +1,5 @@
-import os
-
 from sqlmodel import create_engine, SQLModel, Session
 from app.config import get_settings
-
-PASSWORD = os.environ["POSTGRES_PASSWORD"]
-postgesql_url = f"postgresql://postgres:{PASSWORD}@localhost:8081/postgres"
 
 
 engine = create_engine(get_settings().database_url, pool_pre_ping=True)

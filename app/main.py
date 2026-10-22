@@ -20,6 +20,10 @@ app = FastAPI(lifespan=lifespan)
 app.include_router(user_controller.router)
 app.include_router(task_controller.router)
 
+@app.get("/healthz")
+async def healthz():
+    return {"status": "ok"}
+
 @app.get("/")
 async def hello():
     return {"omg":1}

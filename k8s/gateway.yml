@@ -24,3 +24,7 @@ spec:
       backendRefs:
         - name: task-api
           port: 80
+          weight: 90
+        - name: task-api-v2
+          port: 80
+          weight: 10

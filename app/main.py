@@ -22,7 +22,7 @@ app.include_router(task_controller.router)
 
 @app.get("/healthz")
 async def healthz():
-    return {"status": "ok"}
+    return {"status": "ok", "version": "0.2"}
 
 @app.get("/")
 async def hello():

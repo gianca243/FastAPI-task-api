@@ -1,5 +1,5 @@
-import os
 from functools import lru_cache
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,11 +28,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-# def define_env_variables():
-#     settings = Settings()
-#     os.environ["POSTGRES_PASSWORD"] = settings.POSTGRES_PASSWORD
-#     os.environ["ACCESS_TOKEN_EXPIRE_MINUTES"] = settings.ACCESS_TOKEN_EXPIRE_MINUTES
-#     os.environ["SECRET"] = settings.SECRET
-#     print("omg env variables are configured")
-
-# define_env_variables()

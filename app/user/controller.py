@@ -1,30 +1,32 @@
-import os
-import jwt
-import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
+
+import jwt
+from fastapi import APIRouter, Body, Depends, HTTPException, Security, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from passlib.context import CryptContext
-from fastapi import APIRouter, Body, Depends, Query, HTTPException, status, Security
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel, Field
 from sqlmodel import Session, select
+
+from app.config import get_settings
 from app.db import get_session
 from app.user.model import User
-from app.config import get_settings
-
-from pydantic import BaseModel, Field
 
 settings = get_settings()
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
 SECRET = settings.secret
 ALGORITHM = "HS256"
 
+
 class UserModel(BaseModel):
     password: str = Field(min_length=8)
     name: str = Field(min_length=4, max_length=20)
 
+
 class Token(BaseModel):
     access_token: str
     token_type: str
+
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -33,18 +35,21 @@ security = HTTPBearer()
 
 SessionDep = Annotated[Session, Depends(get_session)]
 
+
 async def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=15)
+        expire = datetime.now(UTC) + timedelta(minutes=15)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET, algorithm=ALGORITHM)
     return encoded_jwt
 
+
 async def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
+
 
 async def check_user_password(user: UserModel, session: SessionDep):
     statement = select(User).where(User.name == user.name)
@@ -56,7 +61,8 @@ async def check_user_password(user: UserModel, session: SessionDep):
         return False
     return db_user
 
-async def check_jwt(credentials: HTTPAuthorizationCredentials = Security(security)):
+
+async def check_jwt(credentials: Annotated[HTTPAuthorizationCredentials, Security(security)]):
     token = credentials.credentials
     try:
         payload = jwt.decode(token, SECRET, algorithms=[ALGORITHM])
@@ -67,19 +73,15 @@ async def check_jwt(credentials: HTTPAuthorizationCredentials = Security(securit
             detail="No valid token",
         ) from exc
 
+
 @router.post("/signup", tags=["users"])
 async def register(user: Annotated[UserModel, Body()], session: SessionDep):
-    db_user = User(
-        password=pwd_context.hash(user.password),
-        name=user.name
-    )
+    db_user = User(password=pwd_context.hash(user.password), name=user.name)
     session.add(db_user)
     session.commit()
     session.refresh(db_user)
-    return {
-        "password": db_user.password,
-        "name": db_user.name
-    }
+    return {"password": db_user.password, "name": db_user.name}
+
 
 @router.post("/login", tags=["users"])
 async def login(user: Annotated[UserModel, Body()], session: SessionDep):

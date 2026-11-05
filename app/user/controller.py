@@ -67,7 +67,7 @@ async def check_jwt(credentials: Annotated[HTTPAuthorizationCredentials, Securit
     try:
         payload = jwt.decode(token, SECRET, algorithms=[ALGORITHM])
         return payload
-    except (jwt.exceptions.InvalidSignatureError, jwt.exceptions.ExpiredSignatureError) as exc:
+    except jwt.exceptions.InvalidTokenError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="No valid token",
@@ -76,11 +76,15 @@ async def check_jwt(credentials: Annotated[HTTPAuthorizationCredentials, Securit
 
 @router.post("/signup", tags=["users"])
 async def register(user: Annotated[UserModel, Body()], session: SessionDep):
+    possible_user_statement = select(User).where(User.name == user.name)
+    possible_user = session.exec(possible_user_statement).first()
+    if possible_user:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The user is duplicated")
     db_user = User(password=pwd_context.hash(user.password), name=user.name)
     session.add(db_user)
     session.commit()
     session.refresh(db_user)
-    return {"password": db_user.password, "name": db_user.name}
+    return {"id": db_user.id, "name": db_user.name}
 
 
 @router.post("/login", tags=["users"])

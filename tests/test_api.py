@@ -61,8 +61,55 @@ def test_malformed_token(client):
     assert response.status_code == 401
 
 
-def signup_and_login(_client):
-    _ = _client.post("/signup", json={"name": NAME, "password": PASSWORD})
-    response_login = _client.post("/login", json={"name": NAME, "password": PASSWORD})
+def test_update_nonexisting_task(client):
+    token_header = signup_and_login(client)
+
+    response = client.put(
+        "/task", json={"id": 1, "name": "new task", "duration": 3}, headers=token_header
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "There is no such task"
+
+
+def test_update_someone_task(client):
+    token_header = signup_and_login(client)
+    token_header_v2 = signup_and_login(client, "another user", "omgomgomg1")
+
+    task_response = client.post(
+        "/task", json={"name": "task", "duration": 3, "id": 1}, headers=token_header
+    )
+    assert task_response.status_code == 200
+    assert task_response.json()["omg"] == 1
+    response = client.put(
+        "/task", json={"id": 1, "name": "new task", "duration": 3}, headers=token_header_v2
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "There is no such task"
+
+
+def test_delete_nonexisting_task(client):
+    token_header = signup_and_login(client)
+
+    response = client.delete("/task/1", headers=token_header)
+    assert response.status_code == 404
+    assert response.json()["detail"] == "There is no such task"
+
+
+def test_delete_anothers_task(client):
+    token_header = signup_and_login(client)
+    token_header_v2 = signup_and_login(client, "another user", "omgomgomg1")
+
+    task_response = client.post("/task", json={"name": "task", "duration": 3}, headers=token_header)
+    assert task_response.status_code == 200
+    assert task_response.json()["omg"] == 1
+    response = client.delete("/task/1", headers=token_header_v2)
+    assert response.status_code == 404
+    assert response.json()["detail"] == "There is no such task"
+
+
+def signup_and_login(_client, name: str = NAME, password: str = PASSWORD):
+    response_signup = _client.post("/signup", json={"name": name, "password": password})
+    assert response_signup.status_code == 200, response_signup.json()
+    response_login = _client.post("/login", json={"name": name, "password": password})
     token = response_login.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}

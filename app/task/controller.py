@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, Path
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
@@ -16,7 +16,6 @@ SessionDep = Annotated[Session, Depends(get_session)]
 class TaskModel(BaseModel):
     name: str = Field(min_length=2)
     duration: int
-    user_id: int
 
 
 @router.post("/task", tags=["task"])
@@ -36,9 +35,11 @@ async def get_tasks_by_user(user: UserDep, session: SessionDep):
 
 
 @router.put("/task", tags=["task"])
-async def put_task_by_id(task: Annotated[Task, Body()], __: UserDep, session: SessionDep):
-    statement = select(Task).where(Task.id == task.id)
+async def put_task_by_id(task: Annotated[Task, Body()], user: UserDep, session: SessionDep):
+    statement = select(Task).where(Task.id == task.id, Task.user_id == user.get("id", None))
     _task = session.exec(statement).first()
+    if not _task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="There is no such task")
     task_dict = task.model_dump()
     attributes_list = [a for a in task_dict.keys()]
 
@@ -51,9 +52,11 @@ async def put_task_by_id(task: Annotated[Task, Body()], __: UserDep, session: Se
 
 
 @router.delete("/task/{task_id}", tags=["task"])
-async def delete_task_by_id(task_id: Annotated[int, Path()], __: UserDep, session: SessionDep):
-    statement = select(Task).where(Task.id == task_id)
-    _task = session.exec(statement).one()
+async def delete_task_by_id(task_id: Annotated[int, Path()], user: UserDep, session: SessionDep):
+    statement = select(Task).where(Task.id == task_id, Task.user_id == user.get("id", None))
+    _task = session.exec(statement).first()
+    if not _task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="There is no such task")
     session.delete(_task)
     session.commit()
     return {"deleted": 1, "deleted task": _task}

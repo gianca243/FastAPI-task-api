@@ -107,6 +107,23 @@ def test_delete_anothers_task(client):
     assert response.json()["detail"] == "There is no such task"
 
 
+def test_get_an_updated_task(client):
+    token_header = signup_and_login(client)
+
+    task_response = client.post("/task", json={"name": "task", "duration": 3}, headers=token_header)
+    assert task_response.status_code == 200
+    response = client.put(
+        "/task", json={"id": 1, "name": "new task", "duration": 3}, headers=token_header
+    )
+    assert response.status_code == 200
+    task_return = client.get("/task", headers=token_header)
+    assert task_return.status_code == 200
+    task_list = task_return.json()["tasks"]
+    assert len(task_list) > 0
+    task = [item for item in task_list if item.get("name") == "new task"]
+    assert task
+
+
 def signup_and_login(_client, name: str = NAME, password: str = PASSWORD):
     response_signup = _client.post("/signup", json={"name": name, "password": password})
     assert response_signup.status_code == 200, response_signup.json()

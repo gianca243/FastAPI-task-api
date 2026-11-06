@@ -18,6 +18,12 @@ class TaskModel(BaseModel):
     duration: int
 
 
+class TaskPutModel(BaseModel):
+    id: int
+    name: str = Field(min_length=2)
+    duration: int
+
+
 @router.post("/task", tags=["task"])
 async def create_task(task: Annotated[TaskModel, Body()], user: UserDep, session: SessionDep):
     _task = Task(name=task.name, duration=task.duration, user_id=user.get("id", None))
@@ -35,12 +41,12 @@ async def get_tasks_by_user(user: UserDep, session: SessionDep):
 
 
 @router.put("/task", tags=["task"])
-async def put_task_by_id(task: Annotated[Task, Body()], user: UserDep, session: SessionDep):
+async def put_task_by_id(task: Annotated[TaskPutModel, Body()], user: UserDep, session: SessionDep):
     statement = select(Task).where(Task.id == task.id, Task.user_id == user.get("id", None))
     _task = session.exec(statement).first()
     if not _task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="There is no such task")
-    task_dict = task.model_dump()
+    task_dict = TaskModel.model_dump(task)
     attributes_list = [a for a in task_dict.keys()]
 
     for attribute in attributes_list:

@@ -1,6 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
-    
+
 from fastapi import FastAPI
 
 from app.db import create_db_and_tables

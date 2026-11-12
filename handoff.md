@@ -1,6 +1,6 @@
 # Handoff — FastAPI task-api (aprendizaje Docker → K8s → AWS)
 
-Última sesión: 2026-11-06. Último commit: `07d7d69`.
+Última sesión: 2026-11-12. Último commit: `24ed437` (más los cambios de `app/main.py` y `k8s/app.yml` si ya se commitearon).
 
 **Forma de trabajo:** en español, paso a paso, primero el concepto y después el código. Yo implemento; Claude revisa y da pistas (no la solución completa). TDD: primero el test en rojo, verificar que falla **por la razón correcta**, y después el verde.
 
@@ -8,46 +8,70 @@
 
 | Fase | Tema | Estado |
 |---|---|---|
-| 1 | App lista para la nube (Settings, `/healthz`, fixes, tests, ruff) | 🟡 MVP casi listo: falta el **reintento de conexión a la BD** |
+| 1 | App lista para la nube (Settings, `/healthz`, fixes, tests, ruff, reintento BD) | ✅ MVP terminado (quedan pulidos en Pendientes) |
 | 2 | Dockerfile + compose (app + db) | ✅ |
 | 3 | K8s local con kind (Deployment, Service, ConfigMap, Secret, Ingress, Gateway API, canary) | ✅ (falta solo la parte AWS: ALB) |
-| 4 | CI con GitHub Actions | ⏳ **siguiente después del reintento** |
+| 4 | CI con GitHub Actions | 👉 **siguiente** |
 | 5 | Infra AWS con Terraform (EKS, ECR, RDS) | ⏳ (ojo con el costo de EKS: `terraform destroy` al terminar cada sesión) |
 | 6 | CD a EKS con GitHub OIDC | ⏳ |
 | 7 | Extras (External Secrets, HPA) | ⏳ |
 
-## 👉 Dónde quedamos: reintento de conexión a la BD (TDD)
+## 👉 Dónde quedamos: fase 4 (CI con GitHub Actions)
 
-**Problema:** tras reiniciar la PC, las réplicas arrancaban antes que CoreDNS. `postgres-service` no resolvía, `create_all` (en el `lifespan`) lanzaba `OperationalError`, el proceso moría y el Pod entraba en CrashLoopBackOff. `create_engine` es perezoso: la primera conexión real ocurre en `create_all`. `pool_pre_ping` no ayuda en el arranque: sirve para conexiones que mueren mientras la app corre.
+**Antes de empezar, cerrar lo que quedó sin commitear (2026-11-12):**
+- `app/main.py`: `lifespan` llama a `retry(create_db_and_tables)` y hace `logging.basicConfig(level=logging.INFO)`. Hay una línea con espacios sobrantes (línea 3): pasar `ruff check --fix . && ruff format .`.
+- `k8s/app.yml`: imagen `task-api:0.3` (la que lleva el retry).
+- Verificar `pytest -q && ruff check . && ruff format --check .` y hacer commit.
 
-**Diseño acordado:** una función genérica, en `app/db.py` o `app/utils.py`:
+**Siguiente: fase 4, CI.** Un workflow de GitHub Actions (`.github/workflows/ci.yml`) que en cada push / PR:
+1. Haga checkout y monte Python 3.12.
+2. Instale `requirements-dev.txt` (con caché de pip).
+3. Corra `ruff check .`, `ruff format --check .` y `pytest -q`.
+
+Pregunta para pensar al retomar: cuando haces `git push`, ¿qué tendría que pasar en GitHub para que tú o un compañero sepan que no rompiste nada, sin ejecutar nada en la máquina local? (conceptos: workflow, trigger `on:`, job, runner, step, `uses:` vs `run:`, badge, branch protection).
+
+## Reintento de conexión a la BD (hecho, 2026-11-12)
+
+**Problema que resuelve:** tras reiniciar la PC, las réplicas arrancaban antes que CoreDNS/Postgres, `create_all` (en el `lifespan`) lanzaba `OperationalError` y el Pod entraba en CrashLoopBackOff.
+
+**Implementación:** `app/utils/retry.py`
 ```python
-def retry(fn, max_attempts=5, base_delay=1.0, sleep=time.sleep): ...
+def retry(fn, max_attempts=5, base_delay=1.0, sleep=time.sleep):
+    # delay = base_delay * 2 ** (attempt - 1) + random.uniform(0, base_delay)
 ```
-- Máximo de intentos; si se agotan, **relanza** la excepción (que el orquestador vea la falla).
-- Backoff exponencial (1, 2, 4, 8…) más **jitter**, contra el *thundering herd*.
-- Reintenta **solo** `sqlalchemy.exc.OperationalError`.
-- Loguea cada intento, por ejemplo "intento 2/5, reintento en 2.3s".
-- `sleep` se inyecta para que los tests no esperen de verdad (inyección de dependencias).
+- Reintenta **solo** `OperationalError`; en el último intento relanza la **misma** excepción con `raise` a secas (se ve el error real en los logs).
+- No espera después del último intento.
+- Backoff exponencial (1, 2, 4, 8 con `base_delay=1`) + jitter contra el *thundering herd*.
+- `logger.warning("intento %d/%d fallo, reintento en %0.1fs", ...)` (estilo `%`, no f-string).
 
-**Tarea pendiente (rojo primero):** crear `tests/test_retry.py` con estos tests:
-1. Falla 2 veces y a la 3ª funciona: no lanza, y `fn` se llamó 3 veces.
-2. Siempre falla: relanza la excepción tras `max_attempts` (`pytest.raises`).
-3. Con un `sleep` falso, las esperas crecen.
-4. *(opcional)* Un `ValueError` no se reintenta: 1 sola llamada.
+**Tests** (`tests/test_retry.py`, 16 tests en total en el repo):
+- Éxito a la 3ª: devuelve lo mismo que `fn` (`expected = object()` + `is`), `fn` llamado 3 veces.
+- Siempre falla: `pytest.raises(...) as excinfo`, `excinfo.value is exc`, `sleep` llamado 4 veces, `fn` 5.
+- Esperas con `@pytest.mark.parametrize` sobre `base_delay` (1.0 y 0.5): cada espera en `[backoff, backoff + base_delay]` recorriendo `sleep.call_args_list`.
+- Hueco aceptado conscientemente: el test de rangos pasaría también **sin** jitter. Para cerrarlo: inyectar `jitter=random.uniform` y testear con un `Mock(return_value=0.25)`.
 
-Pistas:
-- `unittest.mock.Mock(side_effect=[exc, exc, None])`.
-- `OperationalError("stmt", {}, Exception("boom"))`.
+**Lecciones de este paso:**
+- Un verde no vale si el test no verifica lo importante (`return "ok"` fijo, excepción inventada, `result == result`).
+- Mutation testing manual: romper el código a propósito y ver que el test falla; **una mutación a la vez** (si no, la primera tapa a la segunda).
+- Un test que solo prueba valores por defecto deja pasar fórmulas incorrectas (`2 ** ((attempt-1) * base_delay)` coincidía con `base_delay=1`).
+- `side_effect` con lista se agota (`StopIteration`); con una excepción sola falla siempre.
+- `call_args` es solo la **última** llamada; `call_args_list` son todas.
+- `assert` dentro de `with pytest.raises` después de la línea que lanza nunca se ejecuta.
+- `TestClient` sin `lifespan` no ejecuta el arranque: el import roto (`from app.utils import retry` → módulo) solo se vio al encender la app.
+- `pytest -s` muestra los `print`; `-rP` muestra salida de tests que pasan.
 
-**Después:** implementar `retry`, conectarlo en el `lifespan` (`retry(create_db_and_tables)`), probarlo de verdad apagando Postgres en compose, y hacer commit. Luego viene la **fase 4 (CI)**: el pipeline correrá `pytest -q && ruff check . && ruff format --check .`.
+**Probado de verdad:**
+- Compose: `docker compose -f docker/docker-compose.yml up --build --no-deps fast_api_app` (`--no-deps` salta el `depends_on`). Sin Postgres: 4 WARNING y se rinde con el error real. Levantando `postgres_test_server` a mitad: arranca normal.
+- kind: `kubectl scale deployment postgres --replicas=0` → `kubectl rollout restart deployment/task-api` → logs del Pod **nuevo** (`kubectl logs -f <pod>`; `logs deployment/...` elige uno viejo) → `scale --replicas=1`. Conectó en el 5º intento con RESTARTS 0 (ventana justa: ~17 s).
+- Visto también: sin Postgres, el Pod nuevo entra en CrashLoopBackOff (backoff de Kubernetes hasta 5 min) y el rolling update mantiene vivos los Pods viejos porque el nuevo nunca está Ready.
 
 ## Qué hay hecho
 
 **App / fase 1**
 - `GET /healthz` → `{"status": "ok", "version": "0.2"}`, sin consultar la BD (la liveness no depende de nada externo).
 - ruff (`E, F, I, B, UP`, línea 100) configurado en `pyproject.toml`. `B008` resuelto con `Annotated`.
-- pytest: en `tests/conftest.py` se usa SQLite en memoria con `StaticPool` y se sobrescribe `get_session` con `dependency_overrides`. 12 tests en `tests/test_api.py`.
+- pytest: en `tests/conftest.py` se usa SQLite en memoria con `StaticPool` y se sobrescribe `get_session` con `dependency_overrides`. 12 tests en `tests/test_api.py` + 4 en `tests/test_retry.py` (16 en total).
+- Reintento de conexión a la BD al arrancar: `app/utils/retry.py`, usado en el `lifespan` (detalle arriba).
 - Bugs arreglados con TDD:
   - `/signup` ya no devuelve el hash, y responde `409` si el usuario está duplicado.
   - `check_jwt` captura `jwt.InvalidTokenError` (antes, un token malformado daba 500).
@@ -72,14 +96,12 @@ Pistas:
 - `configmap.yml` → `task-api-config`.
 - Secret `task-api-secret` (`POSTGRES_PASSWORD`, `SECRET`): **creado por comando, no está en git** (a propósito).
 - `postgres.yml` → Deployment `postgres` + Service `postgres-service`. ⚠️ Sin volumen: los datos se pierden si el Pod se recrea.
-- `app.yml` → Deployment `task-api` (2 réplicas, imagen `task-api:0.1`, readiness + liveness en `/healthz`) + Service `task-api` (80 → 8000).
+- `app.yml` → Deployment `task-api` (2 réplicas, imagen `task-api:0.3` = con retry, readiness + liveness en `/healthz`) + Service `task-api` (80 → 8000).
 - `app-v2.yml` → Deployment + Service `task-api-v2` (imagen `task-api:0.2`), para el canary.
 - `ingress.yml` → Ingress con clase `cloud-provider-kind`, `/` → `task-api:80`. Pendiente decidir si se borra; la recomendación es quedarse con Gateway API.
 - `gateway.yml` → `Gateway task-api-gateway` + `HTTPRoute task-api` con pesos 90/10 entre `task-api` y `task-api-v2` (con 100 curl se midió 88/12).
 
 ## 🖥️ Configurar el PC nuevo (desde cero)
-
-> ⚠️ **Este `handoff.md` no está en git** (está untracked). Cópialo a mano al otro PC o haz commit (decisión pendiente).
 
 ```bash
 # En WSL (Ubuntu), NO en la carpeta de Windows
@@ -113,8 +135,8 @@ Los tests **no** necesitan `.env`: `conftest.py` pone valores de prueba. El `.en
 **Recrear el clúster kind** (si se va a usar K8s en el PC nuevo):
 ```bash
 kind create cluster --name lab
-docker build -t task-api:0.1 . && kind load docker-image task-api:0.1 --name lab
-docker build -t task-api:0.2 . && kind load docker-image task-api:0.2 --name lab   # para el canary
+docker build -t task-api:0.3 . && kind load docker-image task-api:0.3 --name lab   # la que usa app.yml
+docker tag task-api:0.3 task-api:0.2 && kind load docker-image task-api:0.2 --name lab   # para el canary (app-v2.yml)
 kubectl apply -f k8s/configmap.yml
 kubectl create secret generic task-api-secret \
   --from-literal=POSTGRES_PASSWORD='...' --from-literal=SECRET='...'
@@ -134,7 +156,9 @@ docker port <contenedor-kindccm-gw> 80   # puerto aleatorio en localhost
 ```bash
 kubectl config current-context        # kind-lab
 kubectl get pods                      # postgres + task-api en 1/1
-# Si están en CrashLoopBackOff tras reiniciar la PC, esperar: se recuperan solos (es justo lo que arregla el reintento).
+# Con la imagen 0.3 (retry) ya no deberían quedar en CrashLoopBackOff tras reiniciar la PC.
+# Si Postgres tarda más de ~17 s, igual pueden reiniciarse una vez y recuperarse solos.
+# Ojo: Postgres sin volumen → tras reiniciarlo la BD queda vacía; reiniciar la app recrea las tablas.
 
 kubectl port-forward --address 0.0.0.0 svc/task-api 8080:80   # → http://localhost:8080/docs
 ```
@@ -152,18 +176,21 @@ Compose (fuera de K8s): `docker compose -f docker/docker-compose.yml up --build`
 ## Pendientes
 
 **Fase 1**
-- 👉 Reintento de conexión a la BD (en curso, ver arriba).
+- Logs duplicados de uvicorn (`INFO:uvicorn.error:...`): `basicConfig` configura el logger raíz y los mensajes de uvicorn propagan a él. Configurar solo `logging.getLogger("app")` (nivel + handler) en vez del raíz.
+- Quitar los `print("it begins")` / `print("byee!")` del `lifespan` (usar el logger).
+- Retry: ventana actual ~17 s, justa para Postgres en kind. Opcional: `max_delay` (tope por espera) + más intentos, con su ciclo TDD; y/o inyectar `jitter` para probar que el azar existe.
 - `Task.id` / `User.id` → `int | None = Field(default=None, primary_key=True)`.
 - Limpiar respuestas de relleno (`{"omg": 1, ...}` en `create_task`; hay un test que hace assert sobre `"omg"`).
 - Restricción `unique=True` en `User.name`. La verificación actual tiene una carrera; requiere migración.
 - Alembic para las migraciones, corriéndolas una sola vez (compose: servicio `migrate` + `service_completed_successfully`; K8s: `initContainer` o `Job`).
 - Llamadas síncronas a la BD dentro de `async def`.
 - `passlib` sin mantenimiento (warning de `crypt`, se rompe en Python 3.13): reemplazar por `bcrypt` directo o `pwdlib`.
-- Limpieza: `# import uvicorn` en `app/main.py`; usar `logging` en vez de `print`; agregar `.gitattributes` (`* text=auto eol=lf`).
+- Limpieza: agregar `.gitattributes` (`* text=auto eol=lf`).
 - Opcional: `GET /task/{id}` (feature nueva, con su propio ciclo TDD).
 
 **Ideas para más adelante**
 - Postgres en K8s → StatefulSet + PVC (o RDS en AWS).
-- Readiness vs liveness: decidir si hace falta un `/readyz`. Evaluar un `startupProbe` junto con el reintento.
+- `/readyz` que consulte la BD: en la prueba, los Pods viejos siguieron `1/1` sin Postgres (porque `/healthz` no mira la BD) pero habrían respondido 500.
+- `startupProbe`: si se alargan los reintentos más allá de ~30 s, la liveness actual (10 s × 3) mataría el Pod a mitad del arranque.
 - Degradación elegante: `503` claro cuando la BD no está; escrituras encoladas en SQS (fase AWS).
 - Canary: ejercicio de promote/rollback cambiando los pesos.

@@ -1,17 +1,19 @@
+import logging
 from contextlib import asynccontextmanager
-
-# import uvicorn
+    
 from fastapi import FastAPI
 
 from app.db import create_db_and_tables
 from app.task import controller as task_controller
 from app.user import controller as user_controller
+from app.utils.retry import retry
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("it begins")
-    create_db_and_tables()
+    logging.basicConfig(level=logging.INFO)
+    retry(create_db_and_tables)
     yield
     print("byee!")
 

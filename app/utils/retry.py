@@ -1,4 +1,5 @@
 import logging
+import random
 import time
 
 from sqlalchemy.exc import OperationalError
@@ -13,6 +14,6 @@ def retry(fn, max_attempts=5, base_delay=1.0, sleep=time.sleep):
         except OperationalError:
             if attempt == max_attempts:
                 raise
-            delay = base_delay * attempt
+            delay = base_delay * 2 ** (attempt - 1) + random.uniform(0, base_delay)
             logger.warning("intento %d/%d fallo, reintento en %0.1fs", attempt, max_attempts, delay)
             sleep(delay)
